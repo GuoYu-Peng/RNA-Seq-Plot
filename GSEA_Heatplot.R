@@ -29,7 +29,7 @@ parser$add_argument("--split", action="store_true", dest="SPLIT", help="是否�
 # 取得频次最高的基因列表
 getGeneList <- function(pathway_data) {
   geneList <- stringr::str_c(pathway_data$core_enrichment, collapse = "/") %>% 
-    strsplit(split = "/", fixed = TRUE) %>% unlist() %>% table() %>% unlist()
+    strsplit(split = "/", fixed = TRUE) %>% unlist() %>% table()
   rankGeneList <- geneList[order(geneList, decreasing = TRUE)] %>% names()
   if (length(rankGeneList) > 50) {
     rankGeneList <- rankGeneList[1:50]
@@ -91,22 +91,20 @@ getPlotConfig <- function(plot_data) {
   rowNames <- rownames(plot_data)
   rowNum <- length(rowNames)
   meanRowLength <- meanCharLength(rowNames)
-  heightF1 <- meanRowLength / 40 %>% ceiling()
-  heightF2 <- rowNum * 0.03
-  h <- rowNum * heightF1 * heightF2 * 0.4 %>% ceiling()
+  f1 <- meanRowLength / 40 %>% ceiling()
+  h <- rowNum * f1 * 0.012 %>% ceiling()
   if (h < 7) {
     h = 7
   }
-  minL <- min(plot_data, na.rm = TRUE)
-  maxL <- max(plot_data, na.rm = TRUE)
-  color <- jdb_palette("ocean_brick", type="continuous")
-  if (all(abs(minL) <= 1, abs(maxL) <= 1)) {
+
+  maxAbs <- max(abs(plot_data), na.rm = TRUE)
+  if (maxAbs <= 1) {
     fromL <- -1
     toL <- 1
     breaksL <- c(-1, 0, 1)
     labelsL <- c("-1", "0", "1")
     heightL <- 8
-  } else if (all(abs(minL) <= 2, abs(maxL) <= 2)) {
+  } else if (maxAbs <= 2) {
     fromL <- -2
     toL <- 2
     breaksL <- c(-2, 0, 2)
@@ -119,6 +117,9 @@ getPlotConfig <- function(plot_data) {
     labelsL <- c("<= -4", "-2", "0", "2", ">= 4")
     heightL <- 12
   }
+  
+  color <- jdb_palette("ocean_brick", type="continuous")
+  
   plotConfig[["w"]] <- w
   plotConfig[["h"]] <- h
   plotConfig[["color"]] <- color
@@ -127,6 +128,7 @@ getPlotConfig <- function(plot_data) {
   plotConfig[["breaksL"]] <- breaksL
   plotConfig[["labelsL"]] <- labelsL
   plotConfig[["heightL"]] <- heightL
+  
   return(plotConfig)
 }
 
@@ -145,7 +147,8 @@ hmPlot <- function(plot_data, plot_config) {
                 column_title_side = "top", cluster_rows = FALSE, cluster_columns = FALSE, 
                 show_column_dend = FALSE, show_row_dend = FALSE, show_row_names = TRUE, 
                 show_column_names = TRUE, row_names_side = "left", column_names_side = "bottom", 
-                column_names_rot = 45, row_labels=rowLabels, row_names_max_width=unit(10, "cm"), na_col = "white", column_order = order(colSums(is.na(plot_data))), 
+                column_names_rot = 45, row_labels=rowLabels, row_names_max_width=unit(10, "cm"), 
+                na_col = "white", column_order = order(colSums(is.na(plot_data))), 
                 row_order = order(rowSums(!is.na(plot_data))), border = TRUE, rect_gp = gpar(col="white"), 
                 heatmap_legend_param = list(grid_height = unit(plot_config[["heightL"]], "mm"), grid_width = unit(6, "mm"), at = plot_config[["breaksL"]], labels = plot_config[["labelsL"]]))
   return(hm)
@@ -162,15 +165,12 @@ drawPlot <- function(pathway_data, plot_path, degs_FC, degs_data) {
 }
 
 # 选取前 25 通路
+# 通路过少就退出脚本
 subsetPathways <- function(pathway_data) {
-  if (nrow(pathway_data) > 25) {
-    pathwayData <- dplyr::slice_head(pathway_data, n=25)
-  } else if (nrow(pathway_data) < 5) { 
-    writeLines("\no(≧口≦)o \n通路数目小于 5 请检查数据和参数！")
-    q(save="no")
-  } else
-    {
-    pathwayData <- pathway_data
+  pathwayData <- dplyr::slice_head(pathway_data, n=25)
+  if (nrow(pathwayData) < 5) {
+    writeLines("\n通路数目过少，请检查数据和参数，脚本将退出")
+    q(save = "no")
   }
   return(pathwayData)
 }
@@ -192,8 +192,10 @@ degsData <- read_csv(degsPath) %>% dplyr::arrange(desc(hgnc_symbol)) %>%
 degsFC <- degsData$log2FoldChange
 names(degsFC) <- degsData$entrezgene_id
 
-pathwayData <- read_csv(gseaPath) %>% dplyr::filter(`p.adjust` < pCutoff)
-stopifnot(nrow(pathwayData) > 1)
+# 按照 P 值进行排序
+pathwayData <- read_csv(gseaPath) %>% dplyr::filter(`p.adjust` < pCutoff) %>% 
+  arrange(`p.adjust`)
+
 if (splitPathway) {
   # 按照 ES 值分组画图
   pathwayData1 <- dplyr::filter(pathwayData, enrichmentScore > 0) %>% subsetPathways()
@@ -205,9 +207,10 @@ if (splitPathway) {
   drawPlot(pathwayData1, plotPath1, degsFC, degsData)
   drawPlot(pathwayData2, plotPath2, degsFC, degsData)
 } else {
+  pathwayData <- subsetPathways(pathwayData)
   fileName <- paste(baseName, "GSEA_Heatplot", "pdf", sep=".")
   plotPath <- file.path(outputDir, fileName)
-  drawPlot(subsetPathways(pathwayData), plotPath, degsFC, degsData)
+  drawPlot(pathwayData, plotPath, degsFC, degsData)
 }
 
 writeLines("ヽ(✿ﾟ▽ﾟ)ノ")
